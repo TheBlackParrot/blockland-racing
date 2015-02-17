@@ -213,6 +213,7 @@ package GameModeSpeedKartPackage
          $DefaultMiniGame.scheduleReset(); //don't do it instantly, to give people a little bit of time to ghost
 
       setRequiredTrackBricks();
+      $SK::MapChange = 0;
    }
 
    //when vehicle spawns, it cannot move (event must enable it)

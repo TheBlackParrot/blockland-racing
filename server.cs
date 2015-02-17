@@ -1,4 +1,5 @@
 exec("./load_functions.cs");
+exec("./commands.cs");
 
 function fxDTSBrick::getTopBrick(%this) {
 	%upbrick = %this;
@@ -102,7 +103,7 @@ function serverCmdFlipOver(%this) {
 }
 
 function WheeledVehicle::isGrounded(%this) {
-	initContainerBoxSearch(%this.getPosition(), "0.5 0.5 -1", $TypeMasks::FXBrickObjectType);
+	initContainerBoxSearch(%this.getPosition(), "0.5 0.5 0.5", $TypeMasks::FXBrickObjectType);
 	while((%targetObject = containerSearchNext()) != 0 && isObject(%targetObject)) {
 		return 1;
 	}
@@ -128,9 +129,6 @@ function WheeledVehicle::doBrickCheckLoop(%this) {
 					%this.lastTouched = %targetObject;
 					%this.lastTransform = %this.getTransform();
 				}
-				//talk("TOUCHED" SPC %targetObject SPC "[" @ %this.touchedCount @ "]");
-				%targetObject.setColor(0);
-				%targetObject.schedule(400,setColor,7);
 			}
 		}
 	}
@@ -150,18 +148,7 @@ function WheeledVehicle::doBrickCheckLoop(%this) {
 					messageAll('',"\c3" @ %client.name SPC "\c6has finished in\c3" SPC getPositionString(%this.getApproximatePosition()) SPC "\c6with a time of\c3" SPC getTimeString((getSimTime() - $Racing::StartedAt)/1000) @ "\c6!");
 					%this.inRace = 0;
 					$Racing::Finished++;
-					for(%i=0;%i<$DefaultMinigame.numMembers;%i++) {
-						%mem = $DefaultMinigame.member[%i];
-						if(isObject(%mem.player)) {
-							if(%mem.player.inRace) {
-								%not_finished++;
-							}
-						}
-					}
-					if(!%not_finished) {
-						$DefaultMinigame.messageAll('',"End of round" SPC $SK::ResetCount @ ". A new round will begin in 8 seconds.");
-						$DefaultMinigame.schedule(8000,reset);
-					}
+					$DefaultMinigame.checkToEnd();
 					// YEAH EXPLOSIONS
 					%this.schedule(100,finalExplosion);
 				}
@@ -175,6 +162,21 @@ function WheeledVehicle::doBrickCheckLoop(%this) {
 	}
 
 	// really the only reason why this is here is to "predict" race positions and prevent you lame cheaters from cheating
+}
+
+function MinigameSO::checkToEnd(%this) {
+	for(%i=0;%i<%this.numMembers;%i++) {
+		%mem = %this.member[%i];
+		if(isObject(%mem.player)) {
+			if(%mem.player.inRace) {
+				%not_finished++;
+			}
+		}
+	}
+	if(!%not_finished) {
+		%this.messageAll('',"End of round" SPC $SK::ResetCount @ ". A new round will begin in 8 seconds.");
+		%this.schedule(8000,reset);
+	}
 }
 
 function Vehicle::getApproximatePosition(%this) {
@@ -230,14 +232,17 @@ function GameConnection::doStatLoop(%this) {
 	}
 
 	%str[1] = "<font:Arial Bold:48><color:ffee00>" @ getPositionString(%this.player.getApproximatePosition());
-	%str[2] = "<font:Arial Bold:24><just:center><color:00ff00>Lap" SPC %this.player.laps SPC "/" SPC $Racing::Laps;
-	%str[3] = "<font:Arial Bold:24><just:right><color:ffffff>" @ getTimeString(mFloor(%time[2]/1000)) @ "." @ %time_ms[2] @ " <font:Arial Bold:16><color:aaaaaa>[" @ getTimeString(mFloor(%time[1]/1000)) @ "." @ %time_ms[1] @ "]";
+	%str[2] = "<font:Arial Bold:24><just:right><color:00ff00>Lap" SPC %this.player.laps SPC "/" SPC $Racing::Laps;
+	%str[3] = "<font:Arial Bold:24><color:ffffff>" @ getTimeString(mFloor(%time[2]/1000)) @ "." @ %time_ms[2] @ " <font:Arial Bold:16><color:aaaaaa>[" @ getTimeString(mFloor(%time[1]/1000)) @ "." @ %time_ms[1] @ "]";
 
-	%this.bottomPrint(%str[1] @ %str[2] @ %str[3]);
+	%this.bottomPrint(%str[1] @ %str[2] SPC "\c7::" SPC %str[3],1,1);
 	//%this.bottomPrint(%time);
 }
 
 function MinigameSO::startRace(%this) {
+	if($Racing::HasStarted) {
+		return;
+	}
 	%this.centerPrintAll("\c2<font:Arial Bold:48>GO!",3);
 	$Racing::HasStarted = 1;
 	$Racing::Finished = 0;
@@ -249,11 +254,12 @@ function MinigameSO::startRace(%this) {
 		if(isObject(%client.player)) {
 			%player = %client.player;
 
-			for(%i=0;%i<4;%i++) {
-				%player.setWheelPowered(%i,1);
-				%player.doBrickCheckLoop();
-				%client.doStatLoop();
+			for(%j=0;%j<4;%j++) {
+				%player.setWheelPowered(%j,1);
 			}
+			%player.doBrickCheckLoop();
+			%client.doStatLoop();
+			%player.startedLap = getSimTime();
 		}
 	}
 }
@@ -269,10 +275,9 @@ package GoKartPackage {
 		%obj.touchedCount = 0;
 		%obj.totalTouchedCount = 0;
 		%obj.hasTouched = "";
+		%obj.lastTransform = %obj.getTransform();
 	}
 	function VehicleData::onEnterLiquid(%data, %obj, %coverage, %type) {
-		Parent::onEnterLiquid(%data, %obj, %coverage, %type);
-
 		if(%obj.lastTransform !$= "") {
 			echo("LAST TRANSFORM EXISTS");
 			%rot = getWord(%obj.lastTransform,6);
@@ -283,21 +288,29 @@ package GoKartPackage {
 		} else {
 			// something has gone wrong, just explode them.
 			echo("LAST TRANSFORM DOES NOT EXIST");
-			%obj.finalExplosion();
+			%obj.damage(%obj,%obj.getPosition(),10000,$DamageType::Lava);
+			$DefaultMinigame.checkToEnd();
 		}
+
+		Parent::onEnterLiquid(%data, %obj, %coverage, %type);
 	}
 
 	function GameConnection::spawnPlayer(%this) {
 		parent::spawnPlayer(%this);
 		if(isObject(%this.minigame)) {
 			if(!$Racing::HasStarted) {
+				if(%this.vehicleType $= "") {
+					%type = "SpeedKartclassicgtVehicle";
+				} else {
+					%type = %this.vehicleType;
+				}
 				for(%i=1;%i<=42;%i++) {
 					%brick = "_vehicle_spawn" @ %i;
 					if(!%brick.isUsed) {
 						%this.spawnBrick = %brick;
 						%brick.isUsed = 1;
 						if(!%brick.vehicle) {
-							%brick.setVehicle(SpeedKartclassicgtVehicle.getID());
+							%brick.setVehicle(%type.getID());
 							if(!isObject(%brick.vehicle)) {
 								%brick.respawnVehicle();
 							}
@@ -309,12 +322,17 @@ package GoKartPackage {
 						%brick.vehicle.inRace = 1;
 						$Racing::PlayerAmount++;
 						%this.setControlObject(%brick.vehicle);
+						if(%this.vehicleColor !$= "") {
+							%this.player.schedule(100,setNodeColor,"ALL",%this.vehicleColor);
+						} else {
+							%this.player.schedule(100,setNodeColor,"ALL",getRandom(0,100)/100 SPC getRandom(0,100)/100 SPC getRandom(0,100)/100 SPC "1");
+						}
 						return;
 					} else {
 						if(isObject(%brick)) {
 							if(%this.spawnBrick.getID() == %brick.getID()) {
 								if(!%brick.vehicle) {
-									%brick.setVehicle(SpeedKartclassicgtVehicle.getID());
+									%brick.setVehicle(%type.getID());
 									if(!isObject(%brick.vehicle)) {
 										%brick.respawnVehicle();
 									}
@@ -326,6 +344,11 @@ package GoKartPackage {
 								%brick.vehicle.inRace = 1;
 								$Racing::PlayerAmount++;
 								%this.setControlObject(%brick.vehicle);
+								if(%this.vehicleColor !$= "") {
+									%this.player.schedule(100,setNodeColor,"ALL",%this.vehicleColor);
+								} else {
+									%this.player.schedule(100,setNodeColor,"ALL",getRandom(0,100)/100 SPC getRandom(0,100)/100 SPC getRandom(0,100)/100 SPC "1");
+								}
 								return;
 							}
 						}
@@ -365,7 +388,8 @@ package GoKartPackage {
 
 	function serverCmdSuicide(%this) {
 		if(isObject(%this.minigame)) {
-			%this.player.finalExplosion();
+			%this.player.damage(%this.player,%this.player.getPosition(),10000,$DamageType::Lava);
+			$DefaultMinigame.checkToEnd();
 			messageAll('',"<bitmap:base/client/ui/CI/skull.png>" SPC %this.name);
 		}
 	}
@@ -374,13 +398,19 @@ package GoKartPackage {
 		$Racing::HasStarted = 0;
 		$Racing::PlayerAmount = 0;
 		parent::Reset(%this,%client);
+		if(!$SK::MapChange) {
+			//looks like i have to force respawn everyone?
+			%this.respawnAll();
+			messageAll('',"\c6The race will start in 12 seconds.");
+			%this.schedule(10000,centerPrintAll,"\c0<font:Arial Bold:48>Ready?");
+			%this.schedule(11000,centerPrintAll,"\c3<font:Arial Bold:48>Set?");
+			%this.schedule(12000,startRace);
+		}
+	}
 
-		//looks like i have to force respawn everyone?
-		%this.respawnAll();
-		messageAll('',"\c6The race will start in 12 seconds.");
-		%this.schedule(10000,centerPrintAll,"\c0<font:Arial Bold:48>Ready?");
-		%this.schedule(11000,centerPrintAll,"\c3<font:Arial Bold:48>Set?");
-		%this.schedule(12000,startRace);
+	function GameConnection::onClientLeaveGame(%this) {
+		$Racing::PlayerAmount--;
+		return parent::onClientLeaveGame(%this);
 	}
 };
 activatePackage(GoKartPackage);
