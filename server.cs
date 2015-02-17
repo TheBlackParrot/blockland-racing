@@ -345,14 +345,19 @@ package GoKartPackage {
 		echo("EXPLOSION CALLED");
 		%this.spawnBrick.isUsed = 0;
 		%client = %this.getControllingClient();
-		cancel(%client.statLoop);
-		%camera = %client.Camera;
-		%camera.setFlyMode();
-		%camera.mode = "Observer";
-		%client.setControlObject(%camera);
-		%client.spawnBrick = "";
-		if(isObject(%client.minigame)) {
-			$Racing::PlayerAmount--;
+		if(isObject(%client)) {
+			echo("CLIENT EXISTS:" SPC %client SPC %client.getClassName() SPC %client.getName());
+			cancel(%client.statLoop);
+			%camera = %client.Camera;
+			%camera.setFlyMode();
+			%camera.mode = "Observer";
+			%client.setControlObject(%camera);
+			%client.spawnBrick = "";
+			if(isObject(%client.minigame)) {
+				$Racing::PlayerAmount--;
+			}
+		} else {
+			echo("CLIENT DOESN'T EXIST");
 		}
 
 		parent::finalExplosion(%this);
